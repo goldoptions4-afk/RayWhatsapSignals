@@ -68,15 +68,31 @@ async function connectToWhatsApp() {
     })
 }
 
+// Hardcoded JID for Kevin GOLD & BTC SIGNALS group (joined via invite link)
+const KEVIN_GOLD_JID = process.env.KEVIN_GOLD_JID || ''
+
 async function findTargetGroups() {
     try {
         groupJids = {}
         const groups = await sock.groupFetchAllParticipating()
         for (const [jid, group] of Object.entries(groups)) {
             const name = group.subject?.trim()
+            console.log(`📋 Group: "${name}" (${jid})`)
             if (TARGET_GROUPS.includes(name)) {
                 groupJids[name] = jid
                 console.log(`✅ Found: "${name}" (${jid})`)
+            }
+        }
+        // Try to get Kevin GOLD group via invite link if not found
+        if (!groupJids["Kevin's GOLD & BTC SIGNALS"]) {
+            try {
+                const info = await sock.groupGetInviteInfo('IkmwitDmS5D3vWo8fN6Mhj')
+                if (info && info.id) {
+                    groupJids["Kevin's GOLD & BTC SIGNALS"] = info.id
+                    console.log(`✅ Found via invite: Kevin's GOLD & BTC SIGNALS (${info.id})`)
+                }
+            } catch(e) {
+                console.log('⚠️ Could not get group via invite:', e.message)
             }
         }
         const found = Object.keys(groupJids)
@@ -154,6 +170,16 @@ app.get('/status', (req, res) => {
         groups: groupJids,
         missing: TARGET_GROUPS.filter(g => !groupJids[g])
     })
+})
+
+app.get('/list-groups', async (req, res) => {
+    try {
+        const groups = await sock.groupFetchAllParticipating()
+        const list = Object.values(groups).map(g => g.subject)
+        res.json({ total: list.length, groups: list })
+    } catch (err) {
+        res.status(500).json({ error: err.message })
+    }
 })
 
 app.get('/refresh-groups', async (req, res) => {
