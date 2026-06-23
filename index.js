@@ -2,20 +2,25 @@ const express = require('express')
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys')
 const pino = require('pino')
 const QRCode = require('qrcode')
-const fs = require('fs')
-const path = require('path')
 
 const app = express()
 app.use(express.json())
 
 const PORT = process.env.PORT || 3000
-const TARGET_GROUP = process.env.TARGET_GROUP || 'Dummy to clients'
 const AUTH_DIR = '/tmp/wa_auth'
+
+// All target groups/communities to send to
+const TARGET_GROUPS = [
+    'Dummy to clients',
+    'Gold & Bitcoin Signal',
+    'PREMIUM GOLD GROUP⭐⭐',
+    'WINNERS GOLD SIGNAL'
+]
 
 let sock = null
 let qrCode = null
 let isConnected = false
-let groupJid = null
+let groupJids = {} // { groupName: jid }
 
 // ─────────────────────────────────────────────
 // WHATSAPP CONNECTION
@@ -58,26 +63,29 @@ async function connectToWhatsApp() {
             console.log('✅ WhatsApp connected!')
             isConnected = true
             qrCode = null
-            // Find the target group
-            await findTargetGroup()
+            await findTargetGroups()
         }
     })
 }
 
-async function findTargetGroup() {
+async function findTargetGroups() {
     try {
+        groupJids = {}
         const groups = await sock.groupFetchAllParticipating()
         for (const [jid, group] of Object.entries(groups)) {
-            if (group.subject === TARGET_GROUP) {
-                groupJid = jid
-                console.log(`✅ Found group: ${TARGET_GROUP} (${jid})`)
-                return
+            const name = group.subject?.trim()
+            if (TARGET_GROUPS.includes(name)) {
+                groupJids[name] = jid
+                console.log(`✅ Found: "${name}" (${jid})`)
             }
         }
-        console.log(`⚠️ Group "${TARGET_GROUP}" not found`)
-        console.log('Available groups:', Object.values(groups).map(g => g.subject))
+        const found = Object.keys(groupJids)
+        const missing = TARGET_GROUPS.filter(g => !found.includes(g))
+        if (missing.length > 0) {
+            console.log(`⚠️ Not found: ${missing.join(', ')}`)
+        }
     } catch (err) {
-        console.error('❌ Error finding group:', err.message)
+        console.error('❌ Error finding groups:', err.message)
     }
 }
 
@@ -85,14 +93,16 @@ async function findTargetGroup() {
 // ROUTES
 // ─────────────────────────────────────────────
 
-// QR code page — scan this to connect WhatsApp
 app.get('/qr', async (req, res) => {
     if (isConnected) {
+        const foundGroups = Object.entries(groupJids).map(([name, jid]) => `${name}: ${jid}`).join('<br>')
+        const missing = TARGET_GROUPS.filter(g => !groupJids[g])
         return res.send(`
             <html><body style="font-family:Arial;text-align:center;padding:50px">
             <h2>✅ WhatsApp Connected!</h2>
-            <p>Group: ${TARGET_GROUP}</p>
-            <p>Group JID: ${groupJid || 'Still finding...'}</p>
+            <h3>Groups found:</h3>
+            <p>${foundGroups || 'Still searching...'}</p>
+            ${missing.length ? `<h3>⚠️ Not found:</h3><p>${missing.join(', ')}</p>` : ''}
             </body></html>
         `)
     }
@@ -114,54 +124,45 @@ app.get('/qr', async (req, res) => {
     `)
 })
 
-// Send message to group
 app.post('/send', async (req, res) => {
     const { message } = req.body
+    if (!message) return res.status(400).json({ error: 'no message' })
+    if (!isConnected) return res.status(503).json({ error: 'WhatsApp not connected' })
 
-    if (!message) {
-        return res.status(400).json({ error: 'no message provided' })
+    if (Object.keys(groupJids).length === 0) {
+        await findTargetGroups()
     }
 
-    if (!isConnected) {
-        return res.status(503).json({ error: 'WhatsApp not connected' })
-    }
-
-    if (!groupJid) {
-        // Try to find the group again
-        await findTargetGroup()
-        if (!groupJid) {
-            return res.status(404).json({ error: `Group "${TARGET_GROUP}" not found` })
+    const results = {}
+    for (const [name, jid] of Object.entries(groupJids)) {
+        try {
+            await sock.sendMessage(jid, { text: message })
+            results[name] = 'sent ✅'
+            console.log(`✅ Sent to: ${name}`)
+        } catch (err) {
+            results[name] = `failed ❌: ${err.message}`
+            console.error(`❌ Failed to send to ${name}:`, err.message)
         }
     }
 
-    try {
-        await sock.sendMessage(groupJid, { text: message })
-        console.log(`✅ Message sent to ${TARGET_GROUP}`)
-        return res.json({ status: 'ok', group: TARGET_GROUP })
-    } catch (err) {
-        console.error('❌ Send error:', err.message)
-        return res.status(500).json({ error: err.message })
-    }
+    return res.json({ status: 'ok', results })
 })
 
-// Status check
 app.get('/status', (req, res) => {
     res.json({
         connected: isConnected,
-        group: TARGET_GROUP,
-        groupJid: groupJid || 'not found',
-        hasQR: !!qrCode
+        groups: groupJids,
+        missing: TARGET_GROUPS.filter(g => !groupJids[g])
     })
 })
 
-// Refresh group list
 app.get('/refresh-groups', async (req, res) => {
-    await findTargetGroup()
-    res.json({ groupJid, group: TARGET_GROUP })
+    await findTargetGroups()
+    res.json({ groups: groupJids, missing: TARGET_GROUPS.filter(g => !groupJids[g]) })
 })
 
 app.get('/', (req, res) => {
-    res.json({ status: 'RayWhatsApp running ✅', connected: isConnected })
+    res.json({ status: 'RayWhatsApp running ✅', connected: isConnected, groups: Object.keys(groupJids) })
 })
 
 // ─────────────────────────────────────────────
