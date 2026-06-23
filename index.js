@@ -12,8 +12,8 @@ const AUTH_DIR = '/tmp/wa_auth'
 // All target groups/communities to send to
 const TARGET_GROUPS = [
     'Dummy to clients',
-    'Gold & Bitcoin Signal',
-    'PREMIUM GOLD GROUP⭐⭐',
+    'Kevin's GOLD & BTC SIGNALS',
+    'PREMIUM GOLD GROUP',
     'WINNERS GOLD SIGNAL'
 ]
 
