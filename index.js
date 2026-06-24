@@ -18,10 +18,12 @@ const TARGET_GROUPS = [
     "Kevin's GOLD & BTC SIGNALS"
 ]
 
-// Hardcoded JIDs for groups that appear multiple times (communities)
-const HARDCODED_JIDS = {
-    'PREMIUM GOLD GROUP': '120363413833416433@g.us',
-    'WINNERS GOLD SIGNAL': '120363412510783111@g.us'
+// Invite codes for all 4 target groups
+const GROUP_INVITE_CODES = {
+    'PREMIUM GOLD GROUP': 'BGZCFRRn0MNE3zfRNribEx',
+    "Kevin's GOLD & BTC SIGNALS": 'IkmwitDmS5D3vWo8fN6Mhj',
+    'GOLD | BITCOIN | SIGNALS GROUP': 'I5CCYADRfdn6R3g5DSIvfh',
+    'WINNERS GOLD SIGNAL': 'KDV4VSvU58X0kvgj2rJ63f'
 }
 
 let sock = null
@@ -73,22 +75,16 @@ async function findTargetGroups() {
     try {
         groupJids = {}
 
-        // Apply hardcoded JIDs first for community announcement groups
-        for (const [name, jid] of Object.entries(HARDCODED_JIDS)) {
-            if (TARGET_GROUPS.includes(name)) {
-                groupJids[name] = jid
-                console.log(`📌 Hardcoded: "${name}" (${jid})`)
-            }
-        }
-
-        const groups = await sock.groupFetchAllParticipating()
-        for (const [jid, group] of Object.entries(groups)) {
-            const name = group.subject?.trim()
-            console.log(`📋 Group: "${name}" (${jid})`)
-            // Only add if not already hardcoded
-            if (TARGET_GROUPS.includes(name) && !groupJids[name]) {
-                groupJids[name] = jid
-                console.log(`✅ Found: "${name}" (${jid})`)
+        // Resolve JIDs from invite codes
+        for (const [name, code] of Object.entries(GROUP_INVITE_CODES)) {
+            try {
+                const info = await sock.groupGetInviteInfo(code)
+                if (info && info.id) {
+                    groupJids[name] = info.id
+                    console.log(`✅ Resolved via invite: "${name}" (${info.id})`)
+                }
+            } catch (e) {
+                console.log(`⚠️ Could not resolve invite for "${name}": ${e.message}`)
             }
         }
 
