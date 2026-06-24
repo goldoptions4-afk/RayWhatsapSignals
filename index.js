@@ -141,7 +141,7 @@ app.get('/qr', async (req, res) => {
 })
 
 app.post('/send', async (req, res) => {
-    const { message } = req.body
+    const { message, group } = req.body
     if (!message) return res.status(400).json({ error: 'no message' })
     if (!isConnected) return res.status(503).json({ error: 'WhatsApp not connected' })
 
@@ -149,8 +149,18 @@ app.post('/send', async (req, res) => {
         await findTargetGroups()
     }
 
+    // If a specific group is requested, only send to that one
+    const targets = group
+        ? Object.entries(groupJids).filter(([name]) => name === group)
+        : Object.entries(groupJids)
+
+    if (group && targets.length === 0) {
+        console.log(`⚠️ Group not found: "${group}"`)
+        return res.status(404).json({ error: `group not found: ${group}` })
+    }
+
     const results = {}
-    for (const [name, jid] of Object.entries(groupJids)) {
+    for (const [name, jid] of targets) {
         try {
             await sock.sendMessage(jid, { text: message })
             results[name] = 'sent ✅'
