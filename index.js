@@ -70,12 +70,27 @@ async function connectToWhatsApp() {
     })
 }
 
+// Hardcoded JIDs for groups that appear multiple times
+const HARDCODED_JIDS = {
+    'PREMIUM GOLD GROUP': '120363413833416433@g.us',
+    'WINNERS GOLD SIGNAL': '120363412510783111@g.us'
+}
+
 // Hardcoded JID for Kevin GOLD & BTC SIGNALS group (joined via invite link)
 const KEVIN_GOLD_JID = process.env.KEVIN_GOLD_JID || ''
 
 async function findTargetGroups() {
     try {
         groupJids = {}
+
+        // Apply hardcoded JIDs first
+        for (const [name, jid] of Object.entries(HARDCODED_JIDS)) {
+            if (TARGET_GROUPS.includes(name)) {
+                groupJids[name] = jid
+                console.log(`📌 Hardcoded: "${name}" (${jid})`)
+            }
+        }
+
         const groups = await sock.groupFetchAllParticipating()
         for (const [jid, group] of Object.entries(groups)) {
             const name = group.subject?.trim()
