@@ -2,6 +2,8 @@ const express = require('express')
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys')
 const pino = require('pino')
 const QRCode = require('qrcode')
+const https = require('https')
+const http = require('http')
 
 const app = express()
 app.use(express.json())
@@ -140,8 +142,20 @@ app.get('/qr', async (req, res) => {
     `)
 })
 
+async function fetchImageBuffer(url) {
+    return new Promise((resolve, reject) => {
+        const client = url.startsWith('https') ? https : http
+        client.get(url, (res) => {
+            const chunks = []
+            res.on('data', chunk => chunks.push(chunk))
+            res.on('end', () => resolve(Buffer.concat(chunks)))
+            res.on('error', reject)
+        }).on('error', reject)
+    })
+}
+
 app.post('/send', async (req, res) => {
-    const { message, group } = req.body
+    const { message, group, image_url } = req.body
     if (!message) return res.status(400).json({ error: 'no message' })
     if (!isConnected) return res.status(503).json({ error: 'WhatsApp not connected' })
 
@@ -159,10 +173,28 @@ app.post('/send', async (req, res) => {
         return res.status(404).json({ error: `group not found: ${group}` })
     }
 
+    // Fetch image buffer if image_url provided
+    let imageBuffer = null
+    if (image_url) {
+        try {
+            imageBuffer = await fetchImageBuffer(image_url)
+            console.log(`📷 Image fetched: ${image_url}`)
+        } catch (err) {
+            console.log(`⚠️ Could not fetch image, sending text only: ${err.message}`)
+        }
+    }
+
     const results = {}
     for (const [name, jid] of targets) {
         try {
-            await sock.sendMessage(jid, { text: message })
+            if (imageBuffer) {
+                await sock.sendMessage(jid, {
+                    image: imageBuffer,
+                    caption: message
+                })
+            } else {
+                await sock.sendMessage(jid, { text: message })
+            }
             results[name] = 'sent ✅'
             console.log(`✅ Sent to: ${name}`)
         } catch (err) {
