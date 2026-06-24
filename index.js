@@ -11,7 +11,6 @@ app.use(express.json())
 const PORT = process.env.PORT || 3000
 const AUTH_DIR = '/app/wa_auth'
 
-// All target groups/communities to send to
 const TARGET_GROUPS = [
     'PREMIUM GOLD GROUP',
     'GOLD | BITCOIN | SIGNALS GROUP',
@@ -19,14 +18,16 @@ const TARGET_GROUPS = [
     "Kevin's GOLD & BTC SIGNALS"
 ]
 
+// Hardcoded JIDs for groups that appear multiple times (communities)
+const HARDCODED_JIDS = {
+    'PREMIUM GOLD GROUP': '120363413833416433@g.us',
+    'WINNERS GOLD SIGNAL': '120363412510783111@g.us'
+}
+
 let sock = null
 let qrCode = null
 let isConnected = false
-let groupJids = {} // { groupName: jid }
-
-// ─────────────────────────────────────────────
-// WHATSAPP CONNECTION
-// ─────────────────────────────────────────────
+let groupJids = {}
 
 async function connectToWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR)
@@ -56,9 +57,7 @@ async function connectToWhatsApp() {
             console.log('❌ Connection closed. Reconnecting:', shouldReconnect)
             isConnected = false
             qrCode = null
-            if (shouldReconnect) {
-                setTimeout(connectToWhatsApp, 3000)
-            }
+            if (shouldReconnect) setTimeout(connectToWhatsApp, 3000)
         }
 
         if (connection === 'open') {
@@ -70,20 +69,11 @@ async function connectToWhatsApp() {
     })
 }
 
-// Hardcoded JIDs for groups that appear multiple times
-const HARDCODED_JIDS = {
-    'PREMIUM GOLD GROUP': '120363413833416433@g.us',
-    'WINNERS GOLD SIGNAL': '120363412510783111@g.us'
-}
-
-// Hardcoded JID for Kevin GOLD & BTC SIGNALS group (joined via invite link)
-const KEVIN_GOLD_JID = process.env.KEVIN_GOLD_JID || ''
-
 async function findTargetGroups() {
     try {
         groupJids = {}
 
-        // Apply hardcoded JIDs first
+        // Apply hardcoded JIDs first for community announcement groups
         for (const [name, jid] of Object.entries(HARDCODED_JIDS)) {
             if (TARGET_GROUPS.includes(name)) {
                 groupJids[name] = jid
@@ -95,31 +85,31 @@ async function findTargetGroups() {
         for (const [jid, group] of Object.entries(groups)) {
             const name = group.subject?.trim()
             console.log(`📋 Group: "${name}" (${jid})`)
+            // Only add if not already hardcoded
             if (TARGET_GROUPS.includes(name) && !groupJids[name]) {
                 groupJids[name] = jid
                 console.log(`✅ Found: "${name}" (${jid})`)
             }
         }
-        // Try to get Kevin GOLD group via invite link if not found
-        if (!groupJids["Kevin's GOLD & BTC SIGNALS"]) {
-            try {
-                const info = await sock.groupGetInviteInfo('IkmwitDmS5D3vWo8fN6Mhj')
-                if (info && info.id) {
-                    groupJids["Kevin's GOLD & BTC SIGNALS"] = info.id
-                    console.log(`✅ Found via invite: Kevin's GOLD & BTC SIGNALS (${info.id})`)
-                }
-            } catch(e) {
-                console.log('⚠️ Could not get group via invite:', e.message)
-            }
-        }
-        const found = Object.keys(groupJids)
-        const missing = TARGET_GROUPS.filter(g => !found.includes(g))
-        if (missing.length > 0) {
-            console.log(`⚠️ Not found: ${missing.join(', ')}`)
-        }
+
+        const missing = TARGET_GROUPS.filter(g => !groupJids[g])
+        if (missing.length > 0) console.log(`⚠️ Not found: ${missing.join(', ')}`)
+
     } catch (err) {
         console.error('❌ Error finding groups:', err.message)
     }
+}
+
+async function fetchImageBuffer(url) {
+    return new Promise((resolve, reject) => {
+        const client = url.startsWith('https') ? https : http
+        client.get(url, (res) => {
+            const chunks = []
+            res.on('data', chunk => chunks.push(chunk))
+            res.on('end', () => resolve(Buffer.concat(chunks)))
+            res.on('error', reject)
+        }).on('error', reject)
+    })
 }
 
 // ─────────────────────────────────────────────
@@ -157,28 +147,13 @@ app.get('/qr', async (req, res) => {
     `)
 })
 
-async function fetchImageBuffer(url) {
-    return new Promise((resolve, reject) => {
-        const client = url.startsWith('https') ? https : http
-        client.get(url, (res) => {
-            const chunks = []
-            res.on('data', chunk => chunks.push(chunk))
-            res.on('end', () => resolve(Buffer.concat(chunks)))
-            res.on('error', reject)
-        }).on('error', reject)
-    })
-}
-
 app.post('/send', async (req, res) => {
     const { message, group, image_url } = req.body
     if (!message) return res.status(400).json({ error: 'no message' })
     if (!isConnected) return res.status(503).json({ error: 'WhatsApp not connected' })
 
-    if (Object.keys(groupJids).length === 0) {
-        await findTargetGroups()
-    }
+    if (Object.keys(groupJids).length === 0) await findTargetGroups()
 
-    // If a specific group is requested, only send to that one
     const targets = group
         ? Object.entries(groupJids).filter(([name]) => name === group)
         : Object.entries(groupJids)
@@ -188,7 +163,7 @@ app.post('/send', async (req, res) => {
         return res.status(404).json({ error: `group not found: ${group}` })
     }
 
-    // Fetch image buffer if image_url provided
+    // Fetch image if provided
     let imageBuffer = null
     if (image_url) {
         try {
@@ -203,10 +178,7 @@ app.post('/send', async (req, res) => {
     for (const [name, jid] of targets) {
         try {
             if (imageBuffer) {
-                await sock.sendMessage(jid, {
-                    image: imageBuffer,
-                    caption: message
-                })
+                await sock.sendMessage(jid, { image: imageBuffer, caption: message })
             } else {
                 await sock.sendMessage(jid, { text: message })
             }
@@ -233,6 +205,22 @@ app.get('/list-groups', async (req, res) => {
     try {
         const groups = await sock.groupFetchAllParticipating()
         const list = Object.values(groups).map(g => g.subject)
+        res.json({ total: list.length, groups: list })
+    } catch (err) {
+        res.status(500).json({ error: err.message })
+    }
+})
+
+app.get('/list-groups-full', async (req, res) => {
+    try {
+        const groups = await sock.groupFetchAllParticipating()
+        const list = Object.entries(groups).map(([jid, g]) => ({
+            jid,
+            name: g.subject,
+            isCommunity: g.isCommunity,
+            isCommunityAnnounce: g.isCommunityAnnounce,
+            linkedParent: g.linkedParent
+        }))
         res.json({ total: list.length, groups: list })
     } catch (err) {
         res.status(500).json({ error: err.message })
