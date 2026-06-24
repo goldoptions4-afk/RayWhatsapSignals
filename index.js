@@ -11,7 +11,10 @@ const AUTH_DIR = '/app/wa_auth'
 
 // All target groups/communities to send to
 const TARGET_GROUPS = [
-    'PREMIUM GOLD GROUP'
+    'PREMIUM GOLD GROUP',
+    'GOLD | BITCOIN | SIGNALS GROUP',
+    'WINNERS GOLD SIGNAL',
+    "Kevin's GOLD & BTC SIGNALS"
 ]
 
 let sock = null
