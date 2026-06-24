@@ -7,14 +7,11 @@ const app = express()
 app.use(express.json())
 
 const PORT = process.env.PORT || 3000
-const AUTH_DIR = '/tmp/wa_auth'
+const AUTH_DIR = '/app/wa_auth'
 
 // All target groups/communities to send to
 const TARGET_GROUPS = [
-    'Dummy to clients',
-    `Kevin's GOLD & BTC SIGNALS`,
-    'PREMIUM GOLD GROUP',
-    'WINNERS GOLD SIGNAL'
+    'PREMIUM GOLD GROUP'
 ]
 
 let sock = null
