@@ -80,7 +80,7 @@ async function findTargetGroups() {
         for (const [jid, group] of Object.entries(groups)) {
             const name = group.subject?.trim()
             console.log(`📋 Group: "${name}" (${jid})`)
-            if (TARGET_GROUPS.includes(name)) {
+            if (TARGET_GROUPS.includes(name) && !groupJids[name]) {
                 groupJids[name] = jid
                 console.log(`✅ Found: "${name}" (${jid})`)
             }
