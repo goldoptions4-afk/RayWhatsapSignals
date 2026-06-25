@@ -15,7 +15,8 @@ const TARGET_GROUPS = [
     'PREMIUM GOLD GROUP',
     'GOLD | BITCOIN | SIGNALS GROUP',
     'WINNERS GOLD SIGNAL',
-    "Kevin's GOLD & BTC SIGNALS"
+    "Kevin's GOLD & BTC SIGNALS",
+    'Dummy group testing'
 ]
 
 // Hardcoded JIDs — announcement channels for communities, direct JID for regular groups
