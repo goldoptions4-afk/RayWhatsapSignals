@@ -73,13 +73,30 @@ async function connectToWhatsApp() {
 }
 
 async function findTargetGroups() {
-    // Use hardcoded JIDs directly — no scanning needed
     groupJids = {}
+
+    // Apply hardcoded JIDs first for community announcement groups
     for (const [name, jid] of Object.entries(HARDCODED_JIDS)) {
         groupJids[name] = jid
         console.log(`📌 Hardcoded: "${name}" (${jid})`)
     }
-    console.log('✅ All groups loaded from hardcoded JIDs')
+
+    // Scan for remaining groups not in hardcoded list
+    try {
+        const groups = await sock.groupFetchAllParticipating()
+        for (const [jid, group] of Object.entries(groups)) {
+            const name = group.subject?.trim()
+            if (TARGET_GROUPS.includes(name) && !groupJids[name]) {
+                groupJids[name] = jid
+                console.log(`✅ Found by scan: "${name}" (${jid})`)
+            }
+        }
+    } catch (err) {
+        console.error('❌ Error scanning groups:', err.message)
+    }
+
+    const missing = TARGET_GROUPS.filter(g => !groupJids[g])
+    if (missing.length > 0) console.log(`⚠️ Not found: ${missing.join(', ')}`)
 }
 
 async function fetchImageBuffer(url) {
