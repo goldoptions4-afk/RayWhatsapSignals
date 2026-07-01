@@ -99,10 +99,14 @@ async function findTargetGroups() {
     if (missing.length > 0) console.log(`⚠️ Not found: ${missing.join(', ')}`)
 }
 
-async function fetchImageBuffer(url) {
+async function fetchMediaBuffer(url) {
     return new Promise((resolve, reject) => {
         const client = url.startsWith('https') ? https : http
         client.get(url, (res) => {
+            if (res.statusCode && res.statusCode >= 400) {
+                reject(new Error(`HTTP ${res.statusCode} fetching ${url}`))
+                return
+            }
             const chunks = []
             res.on('data', chunk => chunks.push(chunk))
             res.on('end', () => resolve(Buffer.concat(chunks)))
@@ -147,7 +151,7 @@ app.get('/qr', async (req, res) => {
 })
 
 app.post('/send', async (req, res) => {
-    const { message, group, image_url } = req.body
+    const { message, group, image_url, video_url, image_data } = req.body
     if (!message) return res.status(400).json({ error: 'no message' })
     if (!isConnected) return res.status(503).json({ error: 'WhatsApp not connected' })
 
@@ -162,21 +166,41 @@ app.post('/send', async (req, res) => {
         return res.status(404).json({ error: `group not found: ${group}` })
     }
 
-    // Fetch image if provided
+    // Accept image as base64 (preferred — no URL fetch needed) or as URL
     let imageBuffer = null
-    if (image_url) {
+    if (image_data) {
         try {
-            imageBuffer = await fetchImageBuffer(image_url)
-            console.log(`📷 Image fetched: ${image_url}`)
+            imageBuffer = Buffer.from(image_data, 'base64')
+            console.log(`📷 Image from base64: ${imageBuffer.length} bytes`)
+        } catch (err) {
+            console.log(`⚠️ Could not decode base64 image: ${err.message}`)
+        }
+    } else if (image_url) {
+        try {
+            imageBuffer = await fetchMediaBuffer(image_url)
+            console.log(`📷 Image fetched: ${image_url} (${imageBuffer.length} bytes)`)
         } catch (err) {
             console.log(`⚠️ Could not fetch image, sending text only: ${err.message}`)
+        }
+    }
+
+    // Fetch video if provided (takes priority over image if both somehow given)
+    let videoBuffer = null
+    if (video_url) {
+        try {
+            videoBuffer = await fetchMediaBuffer(video_url)
+            console.log(`🎥 Video fetched: ${video_url} (${videoBuffer.length} bytes)`)
+        } catch (err) {
+            console.log(`⚠️ Could not fetch video, falling back: ${err.message}`)
         }
     }
 
     const results = {}
     for (const [name, jid] of targets) {
         try {
-            if (imageBuffer) {
+            if (videoBuffer) {
+                await sock.sendMessage(jid, { video: videoBuffer, caption: message })
+            } else if (imageBuffer) {
                 await sock.sendMessage(jid, { image: imageBuffer, caption: message })
             } else {
                 await sock.sendMessage(jid, { text: message })
