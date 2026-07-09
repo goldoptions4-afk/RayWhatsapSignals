@@ -235,6 +235,63 @@ app.post('/send', async (req, res) => {
     return res.json({ status: 'ok', results })
 })
 
+app.post('/story', async (req, res) => {
+    const { caption, image_url, video_url } = req.body
+    if (!image_url && !video_url) return res.status(400).json({ error: 'no media' })
+    if (!isConnected) return res.status(503).json({ error: 'WhatsApp not connected' })
+
+    if (Object.keys(groupJids).length === 0) await findTargetGroups()
+
+    // Collect every member of every target group so the status is visible to them
+    const jidSet = new Set()
+    for (const [name, jid] of Object.entries(groupJids)) {
+        try {
+            const meta = await sock.groupMetadata(jid)
+            for (const p of (meta.participants || [])) {
+                if (p.id) jidSet.add(p.id)
+            }
+            console.log(`👥 ${name}: ${meta.participants?.length || 0} members`)
+        } catch (err) {
+            console.log(`⚠️ Could not fetch members of ${name}: ${err.message}`)
+        }
+    }
+    // Don't include our own account
+    if (sock.user?.id) {
+        const ownBase = sock.user.id.split(':')[0] + '@s.whatsapp.net'
+        jidSet.delete(ownBase)
+        jidSet.delete(sock.user.id)
+    }
+    const statusJidList = Array.from(jidSet)
+    if (statusJidList.length === 0) {
+        return res.status(500).json({ error: 'no recipients found' })
+    }
+
+    // Fetch the media
+    let content_msg = null
+    try {
+        if (video_url) {
+            const buf = await fetchMediaBuffer(video_url)
+            console.log(`🎥 Story video fetched: ${buf.length} bytes`)
+            content_msg = { video: buf, caption: caption || undefined }
+        } else {
+            const buf = await fetchMediaBuffer(image_url)
+            console.log(`📸 Story image fetched: ${buf.length} bytes`)
+            content_msg = { image: buf, caption: caption || undefined }
+        }
+    } catch (err) {
+        return res.status(500).json({ error: `media fetch failed: ${err.message}` })
+    }
+
+    try {
+        await sock.sendMessage('status@broadcast', content_msg, { statusJidList })
+        console.log(`✅ Story posted — visible to ${statusJidList.length} people`)
+        return res.json({ status: 'ok', visible_to: statusJidList.length })
+    } catch (err) {
+        console.error(`❌ Story post failed: ${err.message}`)
+        return res.status(500).json({ error: err.message })
+    }
+})
+
 app.get('/status', (req, res) => {
     res.json({
         connected: isConnected,
