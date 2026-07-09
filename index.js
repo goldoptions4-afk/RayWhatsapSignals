@@ -151,15 +151,17 @@ app.get('/qr', async (req, res) => {
 })
 
 app.post('/send', async (req, res) => {
-    const { message, group, image_url, video_url, image_data } = req.body
-    if (!message) return res.status(400).json({ error: 'no message' })
+    const { message, group, image_url, video_url, voice_url, image_data, exclude } = req.body
+    if (!message && !image_data && !image_url && !video_url && !voice_url) return res.status(400).json({ error: 'no message or media' })
     if (!isConnected) return res.status(503).json({ error: 'WhatsApp not connected' })
 
     if (Object.keys(groupJids).length === 0) await findTargetGroups()
 
     const targets = group
         ? Object.entries(groupJids).filter(([name]) => name === group)
-        : Object.entries(groupJids)
+        : Object.entries(groupJids).filter(([name]) => !exclude || name !== exclude)
+
+    if (exclude) console.log(`🚫 Excluding group: ${exclude}`)
 
     if (group && targets.length === 0) {
         console.log(`⚠️ Group not found: "${group}"`)
@@ -195,10 +197,27 @@ app.post('/send', async (req, res) => {
         }
     }
 
+    // Fetch voice note if provided
+    let voiceBuffer = null
+    if (voice_url) {
+        try {
+            voiceBuffer = await fetchMediaBuffer(voice_url)
+            console.log(`🎙️ Voice fetched: ${voice_url} (${voiceBuffer.length} bytes)`)
+        } catch (err) {
+            console.log(`⚠️ Could not fetch voice, falling back: ${err.message}`)
+        }
+    }
+
     const results = {}
     for (const [name, jid] of targets) {
         try {
-            if (videoBuffer) {
+            if (voiceBuffer) {
+                // ptt:true renders as a proper WhatsApp voice note (blue mic bubble)
+                await sock.sendMessage(jid, { audio: voiceBuffer, ptt: true, mimetype: 'audio/ogg; codecs=opus' })
+                if (message && message.trim()) {
+                    await sock.sendMessage(jid, { text: message })
+                }
+            } else if (videoBuffer) {
                 await sock.sendMessage(jid, { video: videoBuffer, caption: message })
             } else if (imageBuffer) {
                 await sock.sendMessage(jid, { image: imageBuffer, caption: message })
