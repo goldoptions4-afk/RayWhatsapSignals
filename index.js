@@ -19,6 +19,13 @@ const TARGET_GROUPS = [
     'Dummy group testing'
 ]
 
+// Groups that receive STORIES (group status) — regular groups only,
+// community announcement channels don't support group status
+const STORY_GROUP_JIDS = [
+    '120363406855804020@g.us', // GOLD | BITCOIN | SIGNALS GROUP
+    '120363401990805201@g.us'  // Kevin's GOLD & BTC SIGNALS
+]
+
 // Hardcoded JIDs — announcement channels for communities, direct JID for regular groups
 const HARDCODED_JIDS = {
     'PREMIUM GOLD GROUP':           '120363414747612793@g.us', // announcement channel
@@ -242,17 +249,17 @@ app.post('/story', async (req, res) => {
 
     if (Object.keys(groupJids).length === 0) await findTargetGroups()
 
-    // Collect every member of every target group so the status is visible to them
+    // Collect members of the STORY groups only (used for the fallback mode)
     const jidSet = new Set()
-    for (const [name, jid] of Object.entries(groupJids)) {
+    for (const jid of STORY_GROUP_JIDS) {
         try {
             const meta = await sock.groupMetadata(jid)
             for (const p of (meta.participants || [])) {
                 if (p.id) jidSet.add(p.id)
             }
-            console.log(`👥 ${name}: ${meta.participants?.length || 0} members`)
+            console.log(`👥 ${meta.subject}: ${meta.participants?.length || 0} members`)
         } catch (err) {
-            console.log(`⚠️ Could not fetch members of ${name}: ${err.message}`)
+            console.log(`⚠️ Could not fetch members of ${jid}: ${err.message}`)
         }
     }
     // Don't include our own account
@@ -283,9 +290,20 @@ app.post('/story', async (req, res) => {
     }
 
     try {
-        await sock.sendMessage('status@broadcast', content_msg, { statusJidList })
-        console.log(`✅ Story posted — visible to ${statusJidList.length} people`)
-        return res.json({ status: 'ok', visible_to: statusJidList.length })
+        // Preferred: post as a GROUP STATUS — appears under each group's name
+        // in members' Updates tab, visible to ALL members (contacts or not).
+        if (typeof sock.sendStatusMentions === 'function') {
+            await sock.sendStatusMentions(content_msg, STORY_GROUP_JIDS)
+            console.log(`✅ Group status posted to ${STORY_GROUP_JIDS.length} groups`)
+            return res.json({ status: 'ok', mode: 'group_status', groups: STORY_GROUP_JIDS.length })
+        }
+
+        // Fallback: personal status shared to all group members individually.
+        // NOTE: members who don't have this number saved may not see it.
+        await sock.sendMessage('status@broadcast', content_msg, { statusJidList, broadcast: true })
+        console.log(`✅ Story posted (personal status fallback) — delivered to ${statusJidList.length} people`)
+        console.log('⚠️ sendStatusMentions not available in this Baileys version — members without the number saved may not see the status. Consider upgrading @whiskeysockets/baileys in package.json.')
+        return res.json({ status: 'ok', mode: 'personal_status_fallback', visible_to: statusJidList.length })
     } catch (err) {
         console.error(`❌ Story post failed: ${err.message}`)
         return res.status(500).json({ error: err.message })
